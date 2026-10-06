@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<!--GAME-START-->
+<title>Phone Toss</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Martian+Mono:wght@400;700&display=swap">
+<style>
+  /* Layout: one full-bleed canvas stage, HUD pinned top, overlay card centered */
+  :root {
+    --night: #17131f;      /* room shadow */
+    --wall: #2a2238;
+    --neon: #ff4f9a;       /* accent: neon sign pink */
+    --glow: #ffd36e;       /* lamp light / score */
+    --ink: #f6f0ff;
+    --muted: #a99cc2;
+    --crack: #7fe3ff;
+    --display: "Bungee", "Arial Black", Impact, sans-serif;
+    --mono: "Martian Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; margin: 0; }
+  [hidden] { display: none !important; }
+  body {
+    background: var(--night); color: var(--ink);
+    font-family: var(--mono); overflow: hidden;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  #stage { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .hud {
+    position: fixed; left: 0; right: 0; top: 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 0;
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+    pointer-events: none;
+  }
+  .stat { display: grid; gap: 2px; }
+  .stat .label { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .stat .value { font-family: var(--display); font-size: 28px; line-height: 1; color: var(--glow); font-variant-numeric: tabular-nums; }
+  .stat.right { text-align: right; justify-items: end; }
+  .lives { display: flex; gap: 6px; margin-top: 4px; }
+  .lives i { width: 12px; height: 20px; border-radius: 3px; border: 2px solid var(--ink); display: block; }
+  .lives i.lost { border-color: var(--muted); opacity: .35; background:
+    linear-gradient(60deg, transparent 45%, var(--crack) 46%, transparent 52%); }
+  .wind { font-size: 12px; color: var(--ink); margin-top: 6px; letter-spacing: .06em; }
+  .toast {
+    position: fixed; left: 50%; top: 32%; transform: translate(-50%, -50%);
+    font-family: var(--display); font-size: clamp(28px, 9vw, 54px); color: var(--glow);
+    text-shadow: 0 0 18px rgba(255, 211, 110, .55); pointer-events: none;
+    opacity: 0; transition: opacity .2s, transform .35s; white-space: nowrap;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, -62%); }
+  .toast.bad { color: var(--crack); text-shadow: 0 0 18px rgba(127, 227, 255, .5); }
+  .overlay {
+    position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;
+    background: rgba(23, 19, 31, .72); backdrop-filter: blur(3px);
+  }
+  .card {
+    width: min(360px, 100%); text-align: center; display: grid; gap: 14px;
+    padding: 28px 22px; border: 2px solid var(--neon); border-radius: 18px;
+    background: var(--wall); box-shadow: 0 0 40px rgba(255, 79, 154, .35);
+  }
+  .card h1 {
+    margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(36px, 12vw, 52px);
+    line-height: .95; color: var(--neon); text-shadow: 0 0 16px rgba(255, 79, 154, .7);
+    text-wrap: balance;
+  }
+  .card p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink); }
+  .card .small { font-size: 11px; color: var(--muted); }
+  .card button {
+    font-family: var(--display); font-size: 20px; padding: 14px 18px; border-radius: 12px;
+    border: 0; background: var(--glow); color: var(--night); cursor: pointer;
+  }
+  .card button:focus-visible { outline: 3px solid var(--neon); outline-offset: 3px; }
+  .rules { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; text-align: left; font-size: 12px; }
+  .rules b { color: var(--glow); font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+</head>
+<body>
+
+<div id="stage"><canvas id="c"></canvas></div>
+
+<div class="hud">
+  <div class="stat">
+    <span class="label">Score</span>
+    <span class="value" id="score">0</span>
+    <div class="lives" id="lives"><i></i><i></i><i></i></div>
+  </div>
+  <div class="stat right">
+    <span class="label">Best</span>
+    <span class="value" id="best">0</span>
+    <span class="wind" id="wind">Wind 0.0 m/s</span>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<div class="overlay" id="overlay">
+  <div class="card">
+    <h1 id="ovTitle">Phone Toss</h1>
+    <p id="ovText">Swipe up to throw your phone onto the cushion. Miss the cushion and the screen cracks. Three cracks and you're out.</p>
+    <div class="rules" id="ovRules">
+      <b>+3</b><span>Bullseye, the gold center</span>
+      <b>+2</b><span>Inner ring</span>
+      <b>+1</b><span>Outer cushion</span>
+      <b>x2</b><span>Combo after 3 landings in a row</span>
+    </div>
+    <button id="startBtn" type="button">Start tossing</button>
+    <span class="small">Swipe harder to throw farther. Watch the wind.</span>
+  </div>
+</div>
+
+<script>
+(() => {
+  const cvs = document.getElementById('c');
+  const ctx = cvs.getContext('2d');
+  const $ = id => document.getElementById(id);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const COL = { neon: css('--neon'), glow: css('--glow'), ink: css('--ink'), crack: css('--crack'), wall: css('--wall'), night: css('--night') };
+
+  let W = 0, H = 0, DPR = 1, F = 1, HORIZON = 0;
+  const CAM_H = 1.6, CAM_Z = -1.2, G = 9.8;
+  const HAND = { x: 0, y: 0.6, z: 0 };
+  const PHONE = { w: 0.2, h: 0.38 };    // drawn a bit larger than life so it reads on screen
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    cvs.width = W * DPR; cvs.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    HORIZON = H * 0.34;
+    F = (H * 0.98 - HORIZON) * (0 - CAM_Z) / CAM_H;   // ground at z=0 sits near the bottom edge
+    F = Math.min(F, W * 1.9);
+  }
+  addEventListener('resize', resize); resize();
+
+  function proj(x, y, z) {
+    const d = Math.max(z - CAM_Z, 0.05);
+    const s = F / d;
+    return { x: W / 2 + x * s, y: HORIZON + (CAM_H - y) * s, s };
+  }
+
+  // ---- state ----
+  const S = {
+    playing: false, score: 0, best: 0, lives: 3, combo: 0, wind: 0,
+    phone: null, target: null, particles: [], cracks: 0, shake: 0, t: 0,
+  };
+  try { S.best = +localStorage.getItem('phoneTossBest') || 0; } catch (e) {}
+  $('best').textContent = S.best;
+
+  function newTarget() {
+    const lvl = Math.min(S.score / 10, 1);
+    S.target = {
+      x: (Math.random() * 2 - 1) * (0.6 + lvl * 1.2),
+      z: 3.2 + Math.random() * (2.5 + lvl * 3),
+      r: 0.62 - lvl * 0.14,
+    };
+    S.wind = +( (Math.random() * 2 - 1) * (0.4 + lvl * 2.6) ).toFixed(1);
+    const arrow = S.wind === 0 ? '·' : (S.wind > 0 ? '→' : '←');
+    $('wind').textContent = `Wind ${arrow} ${Math.abs(S.wind).toFixed(1)} m/s`;
+  }
+
+  function resetPhone() {
+    S.phone = { ...HAND, vx: 0, vy: 0, vz: 0, rot: 0, vr: 0, flip: 0, vflip: 0, state: 'hand', timer: 0 };
+  }
+
+  function renderLives() {
+    [...$('lives').children].forEach((el, i) => el.classList.toggle('lost', i >= S.lives));
+  }
+
+  function start() {
+    S.playing = true; S.score = 0; S.lives = 3; S.combo = 0; S.particles = [];
+    $('score').textContent = 0; renderLives();
+    $('overlay').hidden = true;
+    newTarget(); resetPhone();
+    beep(520, .08);
+  }
+  $('startBtn').addEventListener('click', () => { ensureAudio(); start(); });
+
+  // ---- input: swipe ----
+  let drag = null;
+  cvs.addEventListener('pointerdown', e => {
+    if (!S.playing || S.phone.state !== 'hand') return;
+    ensureAudio();
+    drag = { pts: [{ x: e.clientX, y: e.clientY, t: performance.now() }] };
+    cvs.setPointerCapture(e.pointerId);
+  });
+  cvs.addEventListener('pointermove', e => {
+    if (!drag) return;
+    drag.pts.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+    if (drag.pts.length > 12) drag.pts.shift();
+    const p0 = drag.pts[0];
+    S.phone.x = HAND.x + (e.clientX - p0.x) / F * 1.4;
+    S.phone.y = HAND.y + Math.max(0, (p0.y - e.clientY)) / F * 0.6;
+  });
+  cvs.addEventListener('pointerup', e => {
+    if (!drag) return;
+    const pts = drag.pts; drag = null;
+    const now = performance.now();
+    const recent = pts.filter(p => now - p.t < 140);
+    const a = recent[0] || pts[0], b = pts[pts.length - 1];
+    const dt = Math.max((b.t - a.t) / 1000, 0.016);
+    const vxPx = (b.x - a.x) / dt, vyPx = (a.y - b.y) / dt;
+    if (vyPx < 250) { S.phone.x = HAND.x; S.phone.y = HAND.y; return; }   // too weak: snap back to hand
+    throwPhone(vxPx, vyPx);
+  });
+  cvs.addEventListener('pointercancel', () => { drag = null; resetPhone(); });
+
+  function throwPhone(vxPx, vyPx) {
+    const k = 520 / Math.max(H, 500);                 // normalize swipe speed across screen sizes
+    const speed = Math.min(vyPx * k / 135, 13);       // m/s forward
+    const p = S.phone;
+    p.vz = speed * 0.82;
+    p.vy = speed * 0.62;
+    p.vx = Math.max(-4, Math.min(4, vxPx * k / 260));
+    p.vr = p.vx * 1.6 + (Math.random() - .5) * 2;
+    p.vflip = 7 + speed * 0.6;
+    p.state = 'air';
+    whoosh();
+  }
+
+  // ---- physics ----
+  function update(dt) {
+    S.t += dt;
+    const p = S.phone;
+    if (p && p.state === 'air') {
+      p.vy -= G * dt;
+      p.vx += S.wind * 0.55 * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+      p.rot += p.vr * dt; p.flip += p.vflip * dt;
+      if (p.y <= 0) land(p);
+      if (p.z > 14 || Math.abs(p.x) > 6) { p.y = 0; land(p, true); }
+    } else if (p && (p.state === 'landed' || p.state === 'broken')) {
+      p.timer -= dt;
+      p.x += p.vx * dt; p.z += p.vz * dt;
+      p.vx *= 0.86; p.vz *= 0.86;
+      if (p.state === 'landed') p.y = Math.max(p.y + p.vy * dt, p.onCushion);
+      p.vy -= G * dt;
+      if (p.timer <= 0) next();
+    }
+    for (const q of S.particles) {
+      q.vy -= G * 0.5 * dt; q.x += q.vx * dt; q.y += q.vy * dt; q.z += q.vz * dt; q.life -= dt;
+    }
+    S.particles = S.particles.filter(q => q.life > 0 && q.y > -0.2);
+    S.shake = Math.max(0, S.shake - dt * 3);
+  }
+
+  function land(p, offscreen) {
+    const t = S.target;
+    const d = Math.hypot(p.x - t.x, p.z - t.z);
+    let pts = 0;
+    if (!offscreen && d <= t.r) pts = d <= t.r * 0.33 ? 3 : d <= t.r * 0.66 ? 2 : 1;
+    p.flip = 0;
+    if (pts) {
+      S.combo++;
+      const mult = S.combo >= 3 ? 2 : 1;
+      S.score += pts * mult;
+      $('score').textContent = S.score;
+      p.state = 'landed'; p.timer = 1.0; p.onCushion = 0.12;
+      p.y = 0.12; p.vy = 1.2; p.vx *= 0.25; p.vz *= 0.15;
+      const msg = pts === 3 ? 'BULLSEYE!' : pts === 2 ? 'NICE!' : 'SAFE';
+      toast(`${msg} +${pts * mult}${mult > 1 ? ' x2' : ''}`);
+      burst(p, COL.glow, 18);
+      beep(pts === 3 ? 880 : 660, .12); if (pts === 3) setTimeout(() => beep(1180, .12), 90);
+      if (S.score > S.best) { S.best = S.score; $('best').textContent = S.best; try { localStorage.setItem('phoneTossBest', S.best); } catch (e) {} }
+    } else {
+      S.combo = 0; S.lives--; renderLives();
+      p.state = 'broken'; p.timer = 1.2; p.y = 0; p.vy = 0;
+      p.vx *= 0.3; p.vz *= 0.2;
+      p.cracks = makeCracks();
+      S.shake = 1;
+      toast(offscreen ? 'LOST IT!' : 'CRACKED!', true);
+      burst(p, COL.crack, 26);
+      crunch();
+    }
+  }
+
+  function next() {
+    if (S.lives <= 0) return gameOver();
+    if (S.phone.state === 'landed') newTarget();
+    resetPhone();
+  }
+
+  function gameOver() {
+    S.playing = false;
+    $('ovTitle').textContent = 'Out of Phones';
+    $('ovText').textContent = `You scored ${S.score}. Best: ${S.best}. Your phone repair bill is ${(3 * 189).toLocaleString()} dollars.`;
+    $('ovRules').hidden = true;
+    $('startBtn').textContent = 'Toss again';
+    $('overlay').hidden = false;
+  }
+
+  function burst(p, color, n) {
+    for (let i = 0; i < n; i++) {
+      S.particles.push({ x: p.x, y: Math.max(p.y, 0.05), z: p.z, vx: (Math.random() - .5) * 3, vy: Math.random() * 3 + 1, vz: (Math.random() - .5) * 3, life: .6 + Math.random() * .5, color });
+    }
+  }
+
+  function makeCracks() {
+    const lines = [];
+    const cx = (Math.random() - .5) * .5, cy = (Math.random() - .5) * .5;
+    for (let i = 0; i < 7; i++) {
+      const a = Math.random() * Math.PI * 2; let x = cx, y = cy; const seg = [[x, y]];
+      for (let j = 0; j < 3; j++) { x += Math.cos(a + (Math.random() - .5)) * .3; y += Math.sin(a + (Math.random() - .5)) * .3; seg.push([x, y]); }
+      lines.push(seg);
+    }
+    return lines;
+  }
+
+  let toastTimer;
+  function toast(text, bad) {
+    const el = $('toast'); el.textContent = text; el.classList.toggle('bad', !!bad);
+    el.classList.add('show'); clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 750);
+  }
+
+  // ---- drawing ----
+  function drawRoom() {
+    // wall
+    const g = ctx.createLinearGradient(0, 0, 0, HORIZON);
+    g.addColorStop(0, COL.night); g.addColorStop(1, COL.wall);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, HORIZON + 1);
+    // window with city lights
+    const wx = W * 0.08, wy = HORIZON * 0.28, ww = W * 0.26, wh = HORIZON * 0.5;
+    ctx.fillStyle = '#0e1b33'; ctx.fillRect(wx, wy, ww, wh);
+    ctx.fillStyle = 'rgba(255,211,110,.7)';
+    for (let i = 0; i < 18; i++) { const bx = wx + ((i * 37) % 100) / 100 * ww, by = wy + wh * .45 + ((i * 53) % 50) / 100 * wh; ctx.fillRect(bx, by, 3, 3); }
+    ctx.strokeStyle = '#3c3150'; ctx.lineWidth = 4; ctx.strokeRect(wx, wy, ww, wh);
+    ctx.beginPath(); ctx.moveTo(wx + ww / 2, wy); ctx.lineTo(wx + ww / 2, wy + wh); ctx.stroke();
+    // neon sign
+    const flick = Math.sin(S.t * 13) > 0.97 ? 0.4 : 1;
+    ctx.save();
+    ctx.font = `${Math.max(16, Math.min(W, 600) * 0.07)}px Bungee, Impact, sans-serif`;
+    ctx.textAlign = 'center'; ctx.globalAlpha = flick;
+    ctx.shadowColor = COL.neon; ctx.shadowBlur = 22; ctx.fillStyle = COL.neon;
+    ctx.fillText('NO REFUNDS', W * 0.68, HORIZON * 0.55);
+    ctx.restore();
+    // baseboard
+    ctx.fillStyle = '#3c3150'; ctx.fillRect(0, HORIZON - 6, W, 6);
+    // wooden floor
+    const fg = ctx.createLinearGradient(0, HORIZON, 0, H);
+    fg.addColorStop(0, '#3a2a2e'); fg.addColorStop(1, '#6b4636');
+    ctx.fillStyle = fg; ctx.fillRect(0, HORIZON, W, H - HORIZON);
+    ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1;
+    for (let x = -8; x <= 8; x += 0.5) {
+      const a = proj(x, 0, 0), b = proj(x, 0, 40);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    for (let z = 0; z < 30; z += 1.5) {
+      const a = proj(-8, 0, z), b = proj(8, 0, z);
+      ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    // lamp glow pool
+    const lp = proj(0, 0, 5);
+    const rg = ctx.createRadialGradient(lp.x, lp.y, 0, lp.x, lp.y, W * 0.7);
+    rg.addColorStop(0, 'rgba(255,211,110,.14)'); rg.addColorStop(1, 'rgba(255,211,110,0)');
+    ctx.fillStyle = rg; ctx.fillRect(0, HORIZON, W, H - HORIZON);
+  }
+
+  function ellipseAt(x, z, r, y = 0) {
+    const c = proj(x, y, z), f = proj(x, y, z - r), b = proj(x, y, z + r);
+    return { cx: c.x, cy: (f.y + b.y) / 2, rx: r * c.s, ry: Math.abs(f.y - b.y) / 2 };
+  }
+
+  function drawTarget() {
+    const t = S.target; if (!t) return;
+    const h = 0.12;
+    const base = ellipseAt(t.x, t.z, t.r, 0), top = ellipseAt(t.x, t.z, t.r, h);
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,.35)';
+    ctx.beginPath(); ctx.ellipse(base.cx, base.cy + base.ry * .15, base.rx * 1.08, base.ry * 1.1, 0, 0, Math.PI * 2); ctx.fill();
+    // cushion side
+    ctx.fillStyle = '#9c2f63';
+    ctx.beginPath(); ctx.ellipse(base.cx, base.cy, base.rx, base.ry, 0, 0, Math.PI); ctx.lineTo(top.cx - top.rx, top.cy);
+    ctx.ellipse(top.cx, top.cy, top.rx, top.ry, 0, Math.PI, 0, true); ctx.closePath(); ctx.fill();
+    // rings
+    const rings = [[1, COL.neon], [0.66, '#ff86bb'], [0.33, COL.glow]];
+    for (const [k, c] of rings) {
+      const e = ellipseAt(t.x, t.z, t.r * k, h);
+      ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(e.cx, e.cy, e.rx, e.ry, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    // stitching
+    ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 1;
+    const st = ellipseAt(t.x, t.z, t.r * .9, h);
+    ctx.beginPath(); ctx.ellipse(st.cx, st.cy, st.rx, st.ry, 0, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    // distance label
+    const lab = proj(t.x, 0, t.z - t.r - .25);
+    ctx.fillStyle = 'rgba(246,240,255,.75)'; ctx.font = `11px "Martian Mono", monospace`; ctx.textAlign = 'center';
+    ctx.fillText(`${t.z.toFixed(1)} m`, lab.x, lab.y + 4);
+  }
+
+  function drawPhone(p) {
+    // shadow on floor
+    const sh = proj(p.x, 0, p.z);
+    const sa = Math.max(0.08, 0.4 - p.y * 0.12);
+    ctx.fillStyle = `rgba(0,0,0,${sa})`;
+    ctx.beginPath(); ctx.ellipse(sh.x, sh.y, PHONE.w * sh.s * .8, PHONE.w * sh.s * .25, 0, 0, Math.PI * 2); ctx.fill();
+
+    const c = proj(p.x, p.y, p.z);
+    const w = PHONE.w * c.s, h = PHONE.h * c.s;
+    const lying = p.state === 'landed' || p.state === 'broken';
+    const squash = lying ? 0.32 : Math.cos(p.flip);
+    const faceUp = squash >= 0;
+    ctx.save();
+    ctx.translate(c.x, c.y - (lying ? h * squash * .5 : 0));
+    ctx.rotate(p.rot);
+    ctx.scale(1, Math.max(Math.abs(squash), 0.08));
+    const r = w * 0.18;
+    // body
+    ctx.fillStyle = faceUp ? '#111' : '#c9c4d6';
+    roundRect(-w / 2, -h / 2, w, h, r); ctx.fill();
+    ctx.lineWidth = Math.max(1, w * .04); ctx.strokeStyle = '#8a84a0'; ctx.stroke();
+    if (faceUp) {
+      // screen
+      const sg = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+      sg.addColorStop(0, '#5a3df0'); sg.addColorStop(1, COL.neon);
+      ctx.fillStyle = sg; roundRect(-w / 2 + w * .07, -h / 2 + w * .07, w * .86, h - w * .14, r * .6); ctx.fill();
+      ctx.fillStyle = '#111'; roundRect(-w * .14, -h / 2 + w * .1, w * .28, w * .07, w * .035); ctx.fill();
+      // app grid
+      ctx.fillStyle = 'rgba(255,255,255,.55)';
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) {
+        roundRect(-w * .32 + j * w * .24, -h * .3 + i * h * .14, w * .16, w * .16, w * .04); ctx.fill();
+      }
+      if (p.cracks) {
+        ctx.strokeStyle = COL.crack; ctx.lineWidth = Math.max(1, w * .02);
+        for (const seg of p.cracks) {
+          ctx.beginPath(); seg.forEach(([x, y], i) => (i ? ctx.lineTo : ctx.moveTo).call(ctx, x * w, y * h)); ctx.stroke();
+        }
+      }
+    } else {
+      // back: camera bump
+      ctx.fillStyle = '#2b2735'; roundRect(-w * .38, -h * .44, w * .4, w * .4, w * .1); ctx.fill();
+      ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(-w * .27, -h * .44 + w * .1, w * .06, 0, 7); ctx.arc(-w * .27, -h * .44 + w * .28, w * .06, 0, 7); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  function drawAim() {
+    if (!S.playing || S.phone.state !== 'hand' || drag) return;
+    const c = proj(HAND.x, HAND.y, HAND.z);
+    const bob = Math.sin(S.t * 4) * 8;
+    ctx.save(); ctx.globalAlpha = 0.85; ctx.fillStyle = COL.ink; ctx.textAlign = 'center';
+    ctx.font = `12px "Martian Mono", monospace`;
+    ctx.fillText('SWIPE UP', c.x, c.y - PHONE.h * c.s * .62 - 18 + bob);
+    ctx.beginPath(); const ay = c.y - PHONE.h * c.s * .62 - 36 + bob;
+    ctx.moveTo(c.x, ay - 10); ctx.lineTo(c.x - 8, ay); ctx.lineTo(c.x + 8, ay); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawWindFlag() {
+    if (!S.target) return;
+    const t = S.target, base = proj(t.x + t.r + .3, 0, t.z), top = proj(t.x + t.r + .3, 1.0, t.z);
+    ctx.strokeStyle = '#d8d0e8'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(top.x, top.y); ctx.stroke();
+    const len = (0.12 + Math.abs(S.wind) * 0.09) * top.s, dir = Math.sign(S.wind) || 1;
+    const wave = Math.sin(S.t * (4 + Math.abs(S.wind) * 2)) * 4;
+    ctx.fillStyle = COL.glow;
+    ctx.beginPath(); ctx.moveTo(top.x, top.y); ctx.quadraticCurveTo(top.x + dir * len / 2, top.y + wave, top.x + dir * len, top.y + 6);
+    ctx.lineTo(top.x, top.y + 14); ctx.closePath(); ctx.fill();
+  }
+
+  function frame() {
+    ctx.save();
+    if (S.shake > 0) ctx.translate((Math.random() - .5) * 14 * S.shake, (Math.random() - .5) * 14 * S.shake);
+    drawRoom();
+    drawTarget();
+    drawWindFlag();
+    const p = S.phone;
+    // particles behind the phone if further away
+    for (const q of S.particles) {
+      const c = proj(q.x, q.y, q.z);
+      ctx.globalAlpha = Math.min(1, q.life * 2); ctx.fillStyle = q.color;
+      ctx.fillRect(c.x - 2, c.y - 2, Math.max(2, c.s * .03), Math.max(2, c.s * .03));
+    }
+    ctx.globalAlpha = 1;
+    if (p) drawPhone(p);
+    drawAim();
+    ctx.restore();
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min((now - last) / 1000, 1 / 30); last = now;
+    update(dt); frame();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- sound (starts after first tap) ----
+  let ac = null;
+  function ensureAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } }
+  function beep(freq, dur, type = 'square', vol = .06) {
+    if (!ac) return;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.value = freq; g.gain.value = vol;
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
+    o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + dur);
+  }
+  function whoosh() { if (!ac) return; const o = ac.createOscillator(), g = ac.createGain(); o.type = 'sawtooth'; o.frequency.setValueAtTime(300, ac.currentTime); o.frequency.exponentialRampToValueAtTime(90, ac.currentTime + .25); g.gain.value = .03; g.gain.exponentialRampToValueAtTime(.0001, ac.currentTime + .25); o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + .25); }
+  function crunch() {
+    if (!ac) return;
+    const len = ac.sampleRate * .3, buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    const s = ac.createBufferSource(), g = ac.createGain(); g.gain.value = .25; s.buffer = buf; s.connect(g).connect(ac.destination); s.start();
+  }
+
+  // attract mode: show a target and a phone in hand behind the start card
+  newTarget(); resetPhone();
+  requestAnimationFrame(loop);
+})();
+</script>
+<!--GAME-END-->
+</body>
+</html>

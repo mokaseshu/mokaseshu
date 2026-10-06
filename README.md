@@ -10,3 +10,7 @@
 mokaseshu/mokaseshu is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 You can click the Preview link to take a look at your changes.
 --->
+
+## Phone Toss
+
+A mobile-friendly throwing game in `phone-toss/index.html`. Open it in any browser and swipe up to toss your phone onto the cushion. You score up to 3 points per landing and get a x2 combo after three landings in a row. Every miss cracks a screen, and three cracks end the game.
